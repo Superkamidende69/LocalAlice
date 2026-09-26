@@ -1,0 +1,113 @@
+name: localalice
+
+services:
+  postgres:
+    image: quay.io/mudler/localrecall:v0.5.5-postgresql
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: localai
+      POSTGRES_USER: localai
+      POSTGRES_PASSWORD: ${LOCALAI_CLUSTER_DB_PASSWORD}
+    volumes:
+      - localalice_postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U localai -d localai"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  nats:
+    image: nats:2-alpine
+    restart: unless-stopped
+    command: ["--js", "-m", "8222"]
+    ports:
+      - "4222:4222"
+      - "127.0.0.1:8222:8222"
+
+  localai:
+    image: localai-h:talk
+    container_name: localalice-localai
+    restart: unless-stopped
+    init: true
+    ports:
+      - "8080:8080"
+    environment:
+      MODELS_PATH: /models
+      LOCALAI_VRAM_WARM_LIMIT: "0"
+      LOCALAI_ARTIFACT_DOWNLOAD_CONCURRENCY: "4"
+      HF_TOKEN: ${LOCALAI_HF_TOKEN:-}
+      LOCALAI_DISTRIBUTED: "true"
+      LOCALAI_NATS_URL: nats://nats:4222
+      LOCALAI_AUTH: "true"
+      LOCALAI_AUTH_DATABASE_URL: postgresql://localai:${LOCALAI_CLUSTER_DB_PASSWORD}@postgres:5432/localai?sslmode=disable
+      LOCALAI_REGISTRATION_MODE: open
+      LOCALAI_REGISTRATION_TOKEN: ${LOCALAI_CLUSTER_TOKEN}
+      LOCALAI_REGISTRATION_REQUIRE_AUTH: "true"
+      LOCALAI_AUTO_APPROVE_NODES: "true"
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    volumes:
+      # Reuse the existing LocalAI library rather than downloading models again.
+      - type: bind
+        source: H:/LocalAI/models
+        target: /models
+      - type: bind
+        source: H:/LocalAI/backends
+        target: /backends
+      - type: bind
+        source: H:/LocalAI/configuration
+        target: /configuration
+      - type: bind
+        source: H:/LocalAI/data
+        target: /data
+      - type: bind
+        source: H:/LocalAI/images
+        target: /tmp/generated/images
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/readyz"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  freetoken:
+    build:
+      context: ./freetoken-backend
+    image: localalice-freetoken:local
+    container_name: localalice-freetoken
+    restart: unless-stopped
+    init: true
+    healthcheck:
+      disable: true
+    environment:
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    volumes:
+      # FreeToken sees the same LocalAI-managed model library.
+      - type: bind
+        source: H:/LocalAI/models
+        target: /models
+      - type: bind
+        source: H:/LocalAlice/freetoken-backend/adapter.py
+        target: /opt/freetoken-localai/adapter.py
+        read_only: true
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  localalice_postgres:

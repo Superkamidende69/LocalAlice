@@ -1,0 +1,10 @@
+# Copy this into H:/LocalAI/models after LocalAI has downloaded a supported
+# safetensors model directory, then replace model with that directory name.
+name: freetoken-model-name
+backend: freetoken
+model: freetoken-model-directory
+parameters:
+  freetoken_moe_strategy: offload
+  freetoken_memory_ratio: 0.75
+  freetoken_max_running_requests: 1
+  freetoken_start_timeout: 300

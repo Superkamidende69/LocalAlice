@@ -1,0 +1,64 @@
+.talk-page { min-height:calc(100vh - 2rem); padding:2rem clamp(1rem,3vw,3rem); }
+.talk-header { display:flex; align-items:flex-end; justify-content:space-between; gap:1rem; max-width:1500px; margin:0 auto 1.5rem; }
+.talk-header h1 { margin:.2rem 0 .35rem; font-size:clamp(1.65rem,3vw,2.6rem); letter-spacing:-.04em; }
+.talk-header p { margin:0; color:var(--color-text-secondary); }
+.talk-eyebrow,.talk-label { color:var(--color-primary); font-size:.72rem; font-weight:700; letter-spacing:.12em; text-transform:uppercase; }
+.talk-eyebrow { margin:0; }
+.talk-status { display:flex; align-items:center; gap:.55rem; padding:.7rem .9rem; border:1px solid var(--color-border-subtle); border-radius:999px; font-size:.82rem; white-space:nowrap; }
+.status-disconnected { color:var(--color-text-secondary); background:color-mix(in srgb,var(--color-bg-secondary) 82%,transparent); }
+.talk-shell { display:grid; grid-template-columns:minmax(250px,340px) minmax(0,1fr); min-height:min(720px,calc(100vh - 10rem)); max-width:1500px; margin:0 auto; overflow:hidden; border:1px solid var(--color-border-subtle); border-radius:1.35rem; background:linear-gradient(135deg,color-mix(in srgb,var(--color-bg-secondary) 96%,#fff 4%),var(--color-bg-primary)); box-shadow:0 24px 80px rgba(0,0,0,.18); }
+.talk-sidebar { display:flex; flex-direction:column; min-height:0; border-right:1px solid var(--color-border-subtle); background:color-mix(in srgb,var(--color-bg-secondary) 88%,transparent); }
+.sidebar-heading { display:flex; justify-content:space-between; align-items:flex-start; padding:1.35rem 1.25rem 1rem; border-bottom:1px solid var(--color-border-subtle); }
+.sidebar-heading h2 { margin:.25rem 0 0; font-size:1.05rem; }
+.session-dot,.brain-pulse { display:inline-block; width:.5rem; height:.5rem; border-radius:50%; background:var(--color-success); box-shadow:0 0 0 .25rem color-mix(in srgb,var(--color-success) 16%,transparent); }
+.talk-transcript { flex:1; min-height:300px; overflow:auto; padding:1rem; }
+.transcript-empty { display:grid; place-items:center; gap:.5rem; height:100%; min-height:260px; color:var(--color-text-muted); text-align:center; }
+.transcript-empty i { font-size:1.6rem; color:var(--color-primary); }
+.transcript-empty p { margin:0; color:var(--color-text-secondary); }
+.transcript-empty span { font-size:.78rem; }
+.talk-transcript > div:not(.transcript-empty) { display:flex; gap:.65rem; align-items:flex-start; margin-bottom:.85rem; padding:.7rem .75rem; border:1px solid var(--color-border-subtle); border-radius:.8rem; background:color-mix(in srgb,var(--color-bg-primary) 55%,transparent); }
+.talk-transcript p { margin:0; line-height:1.5; }
+.talk-sidebar-footer { padding:1rem 1.25rem 1.25rem; border-top:1px solid var(--color-border-subtle); }
+.talk-field label { display:block; margin-bottom:.45rem; color:var(--color-text-secondary); font-size:.78rem; font-weight:600; }
+.talk-field label i { color:var(--color-primary); margin-right:.35rem; }
+.talk-field select { width:100%; padding:.7rem .75rem; }
+.pipeline-details { display:grid; grid-template-columns:1fr 1fr; gap:.45rem; margin-top:.65rem; font-size:.68rem; color:var(--color-text-muted); }
+.pipeline-details span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:.45rem; border:1px solid var(--color-border-subtle); border-radius:.5rem; }
+.pipeline-details b { display:block; margin-top:.2rem; color:var(--color-text-secondary); overflow:hidden; text-overflow:ellipsis; }
+.talk-stage { position:relative; display:flex; flex-direction:column; min-width:0; padding:1.35rem clamp(1rem,4vw,3.5rem) 1.5rem; overflow:hidden; }
+.talk-stage::before { position:absolute; inset:0; content:""; pointer-events:none; opacity:.25; background-image:linear-gradient(color-mix(in srgb,var(--color-primary) 7%,transparent) 1px,transparent 1px),linear-gradient(90deg,color-mix(in srgb,var(--color-primary) 7%,transparent) 1px,transparent 1px); background-size:48px 48px; mask-image:linear-gradient(to bottom,black,transparent 82%); }
+.stage-toolbar,.stage-controls,.session-settings,.brain-visual { position:relative; z-index:1; }
+.stage-toolbar { display:flex; justify-content:space-between; align-items:center; gap:1rem; }
+.stage-toolbar p { margin:.3rem 0 0; color:var(--color-text-primary); font-size:1.05rem; font-weight:600; }
+.model-chip { display:flex; align-items:center; gap:.45rem; padding:.45rem .65rem; color:var(--color-text-secondary); border:1px solid var(--color-border-subtle); border-radius:999px; font-size:.72rem; }
+.model-chip i { color:var(--color-primary); }
+.brain-visual { display:grid; place-items:center; flex:1; min-height:390px; }
+#brainCanvas { width:min(75vw,610px); height:min(75vw,610px); max-width:100%; max-height:100%; }
+.brain-halo { position:absolute; width:min(42vw,380px); height:min(42vw,380px); border-radius:50%; pointer-events:none; border:1px solid color-mix(in srgb,var(--color-primary) 23%,transparent); box-shadow:0 0 100px color-mix(in srgb,var(--color-primary) 15%,transparent),inset 0 0 70px color-mix(in srgb,var(--color-primary) 7%,transparent); animation:haloDrift 8s ease-in-out infinite; }
+.brain-halo-two { width:min(52vw,470px); height:min(52vw,470px); opacity:.45; animation-delay:-3s; animation-duration:12s; }
+.brain-caption { position:absolute; bottom:1.5rem; display:flex; align-items:center; gap:.65rem; color:var(--color-text-secondary); font-size:.78rem; }
+.brain-pulse { width:.4rem; height:.4rem; animation:pulseDot 1.8s ease-in-out infinite; }
+.stage-controls { display:flex; flex-wrap:wrap; justify-content:center; gap:.65rem; }
+.talk-button { display:inline-flex; align-items:center; justify-content:center; gap:.5rem; padding:.7rem 1rem; border:1px solid transparent; border-radius:.7rem; cursor:pointer; font-weight:650; transition:transform .18s ease,filter .18s ease,border-color .18s ease; }
+.talk-button:hover { transform:translateY(-1px); filter:brightness(1.08); }
+.talk-button-primary { color:#061018; background:linear-gradient(135deg,var(--color-primary),#9ce8ff); }
+.talk-button-danger { color:white; background:var(--color-error); }
+.talk-button-quiet { color:var(--color-text-secondary); background:color-mix(in srgb,var(--color-bg-secondary) 80%,transparent); border-color:var(--color-border-subtle); }
+.session-settings { margin-top:1rem; border:1px solid var(--color-border-subtle); border-radius:.8rem; background:color-mix(in srgb,var(--color-bg-secondary) 70%,transparent); }
+.session-settings summary { padding:.75rem .9rem; cursor:pointer; color:var(--color-text-secondary); font-size:.82rem; }
+.session-settings summary i { margin-right:.4rem; color:var(--color-primary); }
+.settings-grid { display:grid; grid-template-columns:2fr 1fr 1fr; gap:.75rem; padding:.1rem .9rem .9rem; }
+.settings-grid label { color:var(--color-text-secondary); font-size:.73rem; }
+.settings-grid input,.settings-grid textarea { margin-top:.35rem; font-size:.8rem; }
+.diagnostics-panel { position:relative; z-index:2; margin-top:1rem; padding:1rem; border:1px solid var(--color-border-subtle); border-radius:.8rem; background:var(--color-bg-primary); }
+.diagnostics-grid { display:grid; grid-template-columns:1fr 1fr; gap:.75rem; }
+.diagnostics-grid p { margin:0 0 .35rem; font-size:.72rem; color:var(--color-text-secondary); }
+.diagnostics-grid canvas { width:100%; height:auto; background:#05080d; border-radius:.45rem; }
+.diagnostic-stats { display:flex; flex-wrap:wrap; gap:.55rem; margin-top:.75rem; font-size:.68rem; color:var(--color-text-muted); }
+.diagnostic-stats span { padding:.35rem .5rem; border:1px solid var(--color-border-subtle); border-radius:.4rem; }
+.diagnostic-stats b { color:var(--color-text-secondary); }
+.diagnostics-panel pre { max-height:7rem; overflow:auto; margin:.75rem 0 0; font-size:.65rem; white-space:pre-wrap; }
+@keyframes haloDrift { 0%,100% { transform:scale(.97) rotate(0deg); opacity:.7; } 50% { transform:scale(1.03) rotate(8deg); opacity:1; } }
+@keyframes pulseDot { 0%,100% { transform:scale(.8); opacity:.5; } 50% { transform:scale(1.35); opacity:1; } }
+@media (max-width:800px) { .talk-page { padding:1rem; } .talk-header { align-items:flex-start; flex-direction:column; } .talk-shell { grid-template-columns:1fr; } .talk-sidebar { max-height:380px; border-right:0; border-bottom:1px solid var(--color-border-subtle); } .talk-transcript { min-height:150px; } .settings-grid { grid-template-columns:1fr; } .brain-visual { min-height:350px; } }
+@media (prefers-reduced-motion:reduce) { .brain-halo,.brain-pulse { animation:none; } .talk-button { transition:none; } }

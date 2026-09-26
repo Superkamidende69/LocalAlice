@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+  {{template "views/partials/head" .}}
+  <link rel="stylesheet" href="static/talk.css">
+  <script defer src="static/talk.js"></script>
+  <body class="bg-[var(--color-bg-primary)] text-[var(--color-text-primary)]">
+    <div class="app-layout">
+      {{template "views/partials/navbar" .}}
+      <main class="main-content">
+        <div class="main-content-inner talk-page">
+          <header class="talk-header">
+            <div>
+              <p class="talk-eyebrow"><i class="fa-solid fa-sparkles"></i> Local intelligence studio</p>
+              <h1>Talk to your model</h1>
+              <p>Listen, think, and respond in real time.</p>
+            </div>
+            <div id="connectionStatus" class="talk-status status-disconnected">
+              <i id="statusIcon" class="fa-solid fa-circle"></i><span id="statusLabel">Disconnected</span>
+            </div>
+          </header>
+
+          <section class="talk-shell">
+            <aside class="talk-sidebar">
+              <div class="sidebar-heading">
+                <div><span class="talk-label">Conversation</span><h2>Live session</h2></div>
+                <span class="session-dot"></span>
+              </div>
+              <div id="transcript" class="talk-transcript" aria-live="polite">
+                <div class="transcript-empty"><i class="fa-regular fa-message"></i><p>Your conversation will appear here.</p><span>Connect your microphone to begin.</span></div>
+              </div>
+              <div class="talk-sidebar-footer">
+                <div class="talk-field">
+                  <label for="modelSelect"><i class="fa-solid fa-brain"></i> Pipeline model</label>
+                  <select id="modelSelect">
+                    <option value="" disabled>Select a pipeline model</option>
+                    {{ range .PipelineModels }}
+                    <option value="{{.Name}}" data-vad="{{.VAD}}" data-stt="{{.Transcription}}" data-llm="{{.LLM}}" data-tts="{{.TTS}}" data-voice="{{.Voice}}">{{.Name}}</option>
+                    {{ end }}
+                  </select>
+                </div>
+                <div id="pipelineDetails" class="pipeline-details hidden">
+                  <span title="Voice activity detection">VAD <b id="pipelineVAD">--</b></span>
+                  <span title="Speech-to-text">STT <b id="pipelineSTT">--</b></span>
+                  <span title="Language model">LLM <b id="pipelineLLM">--</b></span>
+                  <span title="Text-to-speech">TTS <b id="pipelineTTS">--</b></span>
+                </div>
+              </div>
+            </aside>
+
+            <section class="talk-stage">
+              <div class="stage-toolbar">
+                <div><span class="talk-label">Model presence</span><p id="sphereMode">Standing by</p></div>
+                <div class="model-chip"><i class="fa-solid fa-microchip"></i><span id="sphereComplexity">Adaptive detail</span></div>
+              </div>
+              <div class="brain-visual" id="brainVisual">
+                <div class="brain-halo brain-halo-one"></div><div class="brain-halo brain-halo-two"></div>
+                <canvas id="brainCanvas" aria-label="Reactive model visualization"></canvas>
+                <div class="brain-caption"><span class="brain-pulse"></span><span id="brainCaption">Ready when you are</span></div>
+              </div>
+              <div class="stage-controls">
+                <button id="connectButton" class="talk-button talk-button-primary"><i class="fas fa-plug"></i><span>Connect</span></button>
+                <button id="disconnectButton" class="talk-button talk-button-danger" style="display:none;"><i class="fas fa-plug-circle-xmark"></i><span>Disconnect</span></button>
+                <button id="testToneButton" class="talk-button talk-button-quiet" style="display:none;"><i class="fas fa-wave-square"></i><span>Test tone</span></button>
+                <button id="diagnosticsButton" class="talk-button talk-button-quiet" style="display:none;"><i class="fas fa-chart-line"></i><span>Diagnostics</span></button>
+              </div>
+              <details class="session-settings">
+                <summary><i class="fas fa-sliders"></i> Session settings</summary>
+                <div class="settings-grid">
+                  <label>Instructions<textarea id="instructionsInput" rows="3">You are a helpful voice assistant. Your responses will be spoken aloud using text-to-speech, so keep them concise and conversational. Do not use markdown formatting, bullet points, numbered lists, code blocks, or special characters. Speak naturally as you would in a phone conversation. Avoid parenthetical asides, URLs, and anything that cannot be clearly vocalized.</textarea></label>
+                  <label>Voice<input id="voiceInput" type="text" placeholder="Model default"></label>
+                  <label>Transcription language<input id="languageInput" type="text" placeholder="Auto-detect"></label>
+                </div>
+              </details>
+              <div id="diagnosticsPanel" class="diagnostics-panel" style="display:none;">
+                <div class="diagnostics-grid"><div><p>Waveform</p><canvas id="waveformCanvas" width="400" height="120"></canvas></div><div><p>Spectrum</p><canvas id="spectrumCanvas" width="400" height="120"></canvas></div></div>
+                <div class="diagnostic-stats"><span>Peak <b id="statPeakFreq">--</b></span><span>THD <b id="statTHD">--</b></span><span>RMS <b id="statRMS">--</b></span><span>Rate <b id="statSampleRate">--</b></span><span>Recv <b id="statPacketsRecv">--</b></span><span>Lost <b id="statPacketsLost">--</b></span><span>Jitter <b id="statJitter">--</b></span><span>Concealed <b id="statConcealed">--</b></span></div>
+                <pre id="statsRaw"></pre>
+              </div>
+            </section>
+          </section>
+          <audio id="audioPlayback" autoplay style="display:none;"></audio>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>
