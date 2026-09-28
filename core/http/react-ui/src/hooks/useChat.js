@@ -117,6 +117,7 @@ function saveChats(chats, activeChatId) {
   try {
     const data = {
       chats: chats.map(chat => ({
+        ...chat,
         id: chat.id,
         name: chat.name,
         model: chat.model,
@@ -169,14 +170,19 @@ function createNewChat(model = '', systemPrompt = '', mcpMode = false) {
 }
 
 export function useChat(initialModel = '') {
-  const [chats, setChats] = useState(() => {
-    const stored = loadChats()
+  // Keep the exact loaded snapshot around.  A streaming response must be
+  // durable before React's debounced persistence runs, otherwise a refresh
+  // loses every token that arrived since the last completed message.
+  const [initialStored] = useState(loadChats)
+  const initialStoredRef = useRef(initialStored)
+  const [chats, setChatsState] = useState(() => {
+    const stored = initialStoredRef.current
     if (stored && stored.chats.length > 0) return stored.chats
     return [createNewChat(initialModel)]
   })
 
   const [activeChatId, setActiveChatId] = useState(() => {
-    const stored = loadChats()
+    const stored = initialStoredRef.current
     if (stored && stored.activeChatId) return stored.activeChatId
     return chats[0]?.id
   })
@@ -193,55 +199,96 @@ export function useChat(initialModel = '') {
   // that is loading exactly as it should.
   const [modelLoading, setModelLoading] = useState(null)
   const abortControllerRef = useRef(null)
+  const chatsRef = useRef(chats)
+  const dirtyRef = useRef(false)
+  const syncBusyRef = useRef(false)
+  const submittingRef = useRef(false)
+  const legacyStreamingRef = useRef(false)
+  const [syncError, setSyncError] = useState('')
+  const setChats = useCallback((updater) => {
+    const next = typeof updater === 'function' ? updater(chatsRef.current) : updater
+    chatsRef.current = next
+    dirtyRef.current = true
+    saveChats(next, activeChatIdRef.current)
+    setChatsState(next)
+  }, [])
+  const activeChatIdRef = useRef(activeChatId)
   const startTimeRef = useRef(null)
   const tokenCountRef = useRef(0)
   const maxTpsRef = useRef(0)
   const sharedChatsReadyRef = useRef(false)
-  const lastSharedSaveRef = useRef(0)
 
   const activeChat = chats.find(c => c.id === activeChatId) || chats[0]
 
+  useEffect(() => { chatsRef.current = chats }, [chats])
+  useEffect(() => { activeChatIdRef.current = activeChatId }, [activeChatId])
+
+  // Browser-only MCP tools still use the legacy stream; keep its partial text
+  // without network side effects inside React's state updater.
+  const saveStreamingSnapshot = useCallback((chatId, content, reasoning = '') => {
+    setChats(prev => {
+      const next = prev.map(chat => {
+        if (chat.id !== chatId) return chat
+        const partial = {
+          role: 'assistant',
+          content,
+          reasoning: reasoning || undefined,
+          inProgress: true,
+          timestamp: Date.now(),
+        }
+        const history = [...chat.history]
+        const last = history[history.length - 1]
+        if (last?.inProgress) history[history.length - 1] = partial
+        else history.push(partial)
+        return { ...chat, history, updatedAt: Date.now() }
+      })
+      return next
+    })
+  }, [])
+
   useEffect(() => {
     let cancelled = false
-    const refresh = async (seedWhenEmpty = false) => {
+    const refresh = async () => {
+      if (syncBusyRef.current || submittingRef.current) return
+      syncBusyRef.current = true
       try {
+        if (dirtyRef.current && sharedChatsReadyRef.current) {
+          const snapshot = chatsRef.current
+          const saved = await fetch(apiUrl(API_CONFIG.endpoints.sharedChats), {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chats: snapshot, activeChatId: activeChatIdRef.current, lastSaved: Date.now() }),
+          })
+          if (!saved.ok) throw new Error('Chat save failed; retrying.')
+          if (chatsRef.current === snapshot) dirtyRef.current = false
+        }
         const response = await fetch(apiUrl(API_CONFIG.endpoints.sharedChats))
         if (!response.ok) throw new Error('shared chats unavailable')
         const remote = await response.json()
         if (cancelled) return
-        if (Array.isArray(remote.chats) && remote.chats.length > 0) {
-          if ((remote.lastSaved || 0) > lastSharedSaveRef.current) {
-            setChats(remote.chats)
-            setActiveChatId(remote.activeChatId || remote.chats[0].id)
-            lastSharedSaveRef.current = remote.lastSaved || Date.now()
-          }
-        } else if (seedWhenEmpty) {
-          const lastSaved = Date.now()
-          await fetch(apiUrl(API_CONFIG.endpoints.sharedChats), {
-            method: 'PUT', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ chats, activeChatId, lastSaved }),
-          })
-          lastSharedSaveRef.current = lastSaved
+        if (!dirtyRef.current && !submittingRef.current && !legacyStreamingRef.current && Array.isArray(remote.chats) && remote.chats.length > 0) {
+          chatsRef.current = remote.chats
+          setChatsState(remote.chats)
+          // Active chat is a device preference; another device must not move it.
+          if (!remote.chats.some(c => c.id === activeChatIdRef.current)) setActiveChatId(remote.chats[0].id)
+          saveChats(remote.chats, activeChatIdRef.current)
+        } else if (Array.isArray(remote.chats) && remote.chats.length === 0 && !sharedChatsReadyRef.current) {
+          dirtyRef.current = true
         }
         sharedChatsReadyRef.current = true
+        setSyncError('')
       } catch (_) {
-        // Keep the browser copy usable when the server is temporarily offline.
+        if (!cancelled) setSyncError('Reconnecting to LocalAI. Your saved response will reload when the connection returns.')
+      } finally {
+        syncBusyRef.current = false
       }
     }
-    refresh(true)
-    const interval = setInterval(() => refresh(), 4000)
+    refresh()
+    const interval = setInterval(refresh, 700)
     return () => { cancelled = true; clearInterval(interval) }
   }, [])
 
   useDebouncedEffect(() => {
     saveChats(chats, activeChatId)
-    if (!sharedChatsReadyRef.current) return
-    const lastSaved = Date.now()
-    lastSharedSaveRef.current = lastSaved
-    fetch(apiUrl(API_CONFIG.endpoints.sharedChats), {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chats, activeChatId, lastSaved }),
-    }).catch(() => {})
   }, [chats, activeChatId])
 
   const addChat = useCallback((model = '', systemPrompt = '', mcpMode = false) => {
@@ -260,6 +307,9 @@ export function useChat(initialModel = '') {
       id: generateId(),
       name: `${src.name} (fork)`,
       history: structuredClone(src.history.slice(0, end)),
+      generationId: null,
+      generationStatus: null,
+      generationNotice: null,
       tokenUsage: { prompt: 0, completion: 0, total: 0 },
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -308,17 +358,80 @@ export function useChat(initialModel = '') {
 
   const updateChatSettings = useCallback((chatId, settings) => {
     setChats(prev => prev.map(c =>
-      c.id === chatId ? { ...c, ...settings, updatedAt: Date.now() } : c
+      c.id === chatId ? { ...c, ...settings, ...(settings.history ? { generationId: null, generationStatus: null, generationNotice: null } : {}), updatedAt: Date.now() } : c
     ))
   }, [])
 
   const getContextUsagePercent = useCallback(() => {
     if (!activeChat || !activeChat.contextSize) return null
-    return Math.min(100, (activeChat.tokenUsage.total / activeChat.contextSize) * 100)
+    return Math.min(100, ((Number(activeChat.tokenUsage?.total) || 0) / activeChat.contextSize) * 100)
   }, [activeChat])
 
+  // Turn older conversation into a compact, factual memory.  The summary is
+  // kept as a normal system message, so the existing OpenAI-compatible request
+  // path continues to work with every LocalAI backend.
+  const compactContext = useCallback(async (chatId) => {
+    const chat = chatsRef.current.find(c => c.id === chatId)
+    if (!chat?.model) throw new Error('Choose a model before compacting context.')
+
+    const usable = chat.history.filter(message =>
+      !message.inProgress && ['user', 'assistant', 'system'].includes(message.role)
+    )
+    if (usable.length <= 8) return false
+
+    // Keep the most recent turns verbatim.  Those are usually the active task;
+    // older turns become a concise, durable memory.
+    const recent = usable.slice(-8)
+    const older = usable.slice(0, -8)
+    const text = older.map(message => {
+      const content = typeof message.content === 'string'
+        ? message.content
+        : JSON.stringify(message.content)
+      return `${message.role.toUpperCase()}: ${content}`
+    }).join('\n\n')
+    // A summary request needs headroom too.  Limit the source deterministically
+    // rather than allowing an already-large chat to overflow its own context.
+    const maxChars = Math.max(12000, Math.min(50000, (chat.contextSize || 16000) * 2))
+    const source = text.length > maxChars ? text.slice(-maxChars) : text
+    const response = await fetch(apiUrl(API_CONFIG.endpoints.chatCompletions), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: chat.model,
+        temperature: 0.15,
+        stream: false,
+        messages: [
+          {
+            role: 'system',
+            content: 'Create a compact working-memory summary of this conversation. Preserve user goals, decisions, constraints, names, paths, technical state, unresolved questions, and useful results. Do not invent facts. Write a dense summary for another assistant continuing the same task.',
+          },
+          { role: 'user', content: source },
+        ],
+      }),
+    })
+    if (!response.ok) throw new Error(await extractHttpError(response))
+    const result = await response.json()
+    const summary = result?.choices?.[0]?.message?.content?.trim()
+    if (!summary) throw new Error('The model returned an empty context summary.')
+
+    setChats(prev => prev.map(item => item.id === chatId ? {
+      ...item,
+      archivedHistory: [...(item.archivedHistory || []), ...older],
+      generationId: null,
+      generationStatus: null,
+      generationNotice: null,
+      history: [
+        { role: 'system', content: `Conversation memory (automatically compacted):\n${summary}`, compacted: true, timestamp: Date.now() },
+        ...recent,
+      ],
+      tokenUsage: { prompt: 0, completion: 0, total: 0 },
+      updatedAt: Date.now(),
+    } : item))
+    return true
+  }, [])
+
   const sendMessage = useCallback(async (content, files = [], options = {}) => {
-    if (!activeChat) return
+    if (!activeChat || activeChat.generationStatus === 'running' || submittingRef.current) return
 
     const chatId = activeChat.id
     const model = options.model || activeChat.model
@@ -380,7 +493,10 @@ export function useChat(initialModel = '') {
       const updated = {
         ...c,
         model,
-        history: [...c.history, userMessage],
+        history: [...(options.baseHistory || c.history), userMessage],
+        generationId: null,
+        generationStatus: null,
+        generationNotice: null,
         updatedAt: Date.now(),
       }
       if (c.history.length === 0 && typeof content === 'string') {
@@ -405,9 +521,9 @@ export function useChat(initialModel = '') {
     // the stale pre-truncation state because setChats only schedules an update.
     const baseHistory = options.baseHistory || chat?.history || []
     const historyForApi = baseHistory.filter(m =>
-      m.role !== 'thinking' && m.role !== 'reasoning' && m.role !== 'tool_call' && m.role !== 'tool_result'
+      !m.inProgress && m.role !== 'thinking' && m.role !== 'reasoning' && m.role !== 'tool_call' && m.role !== 'tool_result'
       && !(m.role === 'system' && !effectiveSystemPrompt(typeof m.content === 'string' ? m.content : ''))
-    )
+    ).map(({ role, content, tool_calls, tool_call_id }) => ({ role, content, ...(tool_calls ? { tool_calls } : {}), ...(tool_call_id ? { tool_call_id } : {}) }))
     messages.push(...historyForApi, { role: 'user', content: messageContent })
 
     // include_usage tells LocalAI to emit a trailing chunk with token totals;
@@ -455,7 +571,44 @@ export function useChat(initialModel = '') {
       ? API_CONFIG.endpoints.mcpChatCompletions
       : API_CONFIG.endpoints.chatCompletions
 
+    // Normal chats and server MCP tools are owned by LocalAI. The UI only
+    // polls saved snapshots, so unmount/reload does not cancel inference.
+    if (!options.clientMCPTools?.length) {
+      submittingRef.current = true
+      const id = generateId()
+      const snapshot = chatsRef.current.find(c => c.id === chatId)
+      setChats(prev => prev.map(c => c.id === chatId ? { ...c, generationId: id, generationStatus: 'running' } : c))
+      try {
+        const payload = JSON.stringify({ id, chat: snapshot, endpoint, request: requestBody })
+        // The same request ID makes retries safe if only the acknowledgement
+        // is lost; it cannot trigger a duplicate generation.
+        let response
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            response = await fetch(apiUrl('/api/chats/generate'), {
+              method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload,
+            })
+            break
+          } catch (error) {
+            if (attempt === 2) throw error
+            await new Promise(resolve => setTimeout(resolve, 700))
+          }
+        }
+        if (!response.ok) throw new Error(await extractHttpError(response))
+        // A GET now recovers the authoritative job, including if the page
+        // disappears before its first token or before this POST resolves.
+        dirtyRef.current = false
+      } catch (error) {
+        setChats(prev => prev.map(c => c.id === chatId ? { ...c, generationStatus: 'failed', generationNotice: `Could not confirm generation: ${error.message}. Reconnecting checks for saved output.` } : c))
+        dirtyRef.current = false
+      } finally {
+        submittingRef.current = false
+      }
+      return
+    }
+
     const controller = new AbortController()
+    legacyStreamingRef.current = true
     abortControllerRef.current = controller
     setIsStreaming(true)
     setStreamingChatId(activeChatId)
@@ -567,6 +720,8 @@ export function useChat(initialModel = '') {
                     } else {
                       setStreamingContent(assistantContent)
                     }
+                    const { regularContent: savedContent } = extractThinking(assistantContent)
+                    saveStreamingSnapshot(chatId, savedContent || assistantContent, reasoningContent)
                     updateTps()
                   }
                   break
@@ -660,6 +815,7 @@ export function useChat(initialModel = '') {
                     : parsed.error.message || 'Unknown error'
                   rawContent += `\n\nError: ${errMsg}`
                   setStreamingContent(rawContent)
+                  saveStreamingSnapshot(chatId, rawContent, reasoningContent)
                   continue
                 }
 
@@ -757,6 +913,8 @@ export function useChat(initialModel = '') {
                     setStreamingContent(rawContent)
                   }
 
+                  const { regularContent: savedContent } = extractThinking(rawContent)
+                  saveStreamingSnapshot(chatId, savedContent || rawContent, reasoningContent)
                   updateTps()
                 }
                 if (parsed?.usage) {
@@ -859,6 +1017,7 @@ export function useChat(initialModel = '') {
     }
 
     // Finalize
+    legacyStreamingRef.current = false
     setIsStreaming(false)
     setStreamingChatId(null)
     setModelLoading(null)
@@ -878,7 +1037,9 @@ export function useChat(initialModel = '') {
         if (c.id !== chatId) return c
         return {
           ...c,
-          history: [...c.history, ...newMessages],
+          // A streaming snapshot is a durable placeholder.  Replace it with
+          // the completed turn instead of leaving a duplicate assistant reply.
+          history: [...c.history.filter(message => !message.inProgress), ...newMessages],
           tokenUsage: {
             prompt: usage.prompt_tokens || c.tokenUsage.prompt,
             completion: usage.completion_tokens || c.tokenUsage.completion,
@@ -888,7 +1049,7 @@ export function useChat(initialModel = '') {
         }
       }))
     }
-  }, [activeChat, chats])
+  }, [activeChat, chats, saveStreamingSnapshot])
 
   function updateTps() {
     const elapsed = (Date.now() - startTimeRef.current) / 1000
@@ -902,14 +1063,20 @@ export function useChat(initialModel = '') {
   }
 
   const stopGeneration = useCallback(() => {
+    if (activeChat?.generationStatus === 'running') {
+      fetch(apiUrl(`/api/chats/generations/${encodeURIComponent(activeChat.generationId)}/cancel`), { method: 'POST' })
+        .then(response => { if (!response.ok) throw new Error('Stop request failed') })
+        .catch(error => setSyncError(error.message))
+      return
+    }
     if (abortControllerRef.current) {
       abortControllerRef.current.abort()
     }
-  }, [])
+  }, [activeChat?.generationId, activeChat?.generationStatus])
 
   const clearHistory = useCallback((chatId) => {
     setChats(prev => prev.map(c =>
-      c.id === chatId ? { ...c, history: [], tokenUsage: { prompt: 0, completion: 0, total: 0 }, updatedAt: Date.now() } : c
+      c.id === chatId ? { ...c, history: [], generationId: null, generationStatus: null, generationNotice: null, tokenUsage: { prompt: 0, completion: 0, total: 0 }, updatedAt: Date.now() } : c
     ))
   }, [])
 
@@ -930,8 +1097,9 @@ export function useChat(initialModel = '') {
     chats,
     activeChat,
     activeChatId,
-    isStreaming: isActiveStreaming,
-    streamingChatId: isStreaming ? streamingChatId : null,
+    isStreaming: isActiveStreaming || activeChat?.generationStatus === 'running',
+    streamingChatId: isStreaming ? streamingChatId : chats.find(c => c.generationStatus === 'running')?.id,
+    syncError,
     streamingContent: isActiveStreaming ? streamingContent : '',
     streamingReasoning: isActiveStreaming ? streamingReasoning : '',
     streamingToolCalls: isActiveStreaming ? streamingToolCalls : [],
@@ -948,6 +1116,7 @@ export function useChat(initialModel = '') {
     sendMessage,
     stopGeneration,
     clearHistory,
+    compactContext,
     getContextUsagePercent,
     addMessage,
   }

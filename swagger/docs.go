@@ -22,6 +22,62 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/api/chats/generate": {
+            "post": {
+                "tags": [
+                    "inference"
+                ],
+                "summary": "Start a saved UI chat generation",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Generation accepted",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/chats/generations/{id}/cancel": {
+            "post": {
+                "tags": [
+                    "inference"
+                ],
+                "summary": "Stop a saved UI chat generation",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "type": "string"
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Generation cancellation accepted"
+                    }
+                }
+            }
+        },
         "/3d/animate": {
             "post": {
                 "tags": [

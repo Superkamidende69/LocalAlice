@@ -11,6 +11,8 @@ type RouteFeature struct {
 // To gate a new endpoint, add an entry here -- no other file changes needed.
 var RouteFeatureRegistry = []RouteFeature{
 	// Chat / Completions
+	{"POST", "/api/chats/generate", FeatureChat},
+	{"POST", "/api/chats/generations/:id/cancel", FeatureChat},
 	{"POST", "/v1/chat/completions", FeatureChat},
 	{"POST", "/chat/completions", FeatureChat},
 	{"POST", "/v1/completions", FeatureChat},

@@ -330,7 +330,7 @@ export default function Chat() {
     chats, activeChat, activeChatId, isStreaming, streamingChatId, streamingContent,
     streamingReasoning, streamingToolCalls, tokensPerSecond, maxTokensPerSecond, modelLoading,
     addChat, forkChat, switchChat, deleteChat, deleteAllChats, renameChat, updateChatSettings,
-    sendMessage, stopGeneration, clearHistory, getContextUsagePercent, addMessage,
+    sendMessage, stopGeneration, clearHistory, compactContext, getContextUsagePercent, addMessage, syncError,
   } = useChat(urlModel || '')
 
   // Detect active staging operation for the current chat's model
@@ -390,6 +390,7 @@ export default function Chat() {
   const [completionGlowIdx, setCompletionGlowIdx] = useState(-1)
   const [editingMessageIndex, setEditingMessageIndex] = useState(null)
   const [messageEditDraft, setMessageEditDraft] = useState('')
+  const [isCompacting, setIsCompacting] = useState(false)
   const prevStreamingRef = useRef(false)
   const {
     connect: mcpConnect, disconnect: mcpDisconnect, disconnectAll: mcpDisconnectAll,
@@ -419,6 +420,19 @@ export default function Chat() {
   const toggleFocusMode = (next) => {
     setFocusModeEnabled(next)
     try { localStorage.setItem(FOCUS_MODE_KEY, String(next)) } catch (_) {}
+  }
+
+  const handleCompactContext = async () => {
+    if (!activeChat || isStreaming || isCompacting) return
+    setIsCompacting(true)
+    try {
+      const changed = await compactContext(activeChat.id)
+      addToast(changed ? 'Older messages were compacted into conversation memory.' : 'There is not enough conversation to compact yet.', changed ? 'success' : 'info', 3000)
+    } catch (error) {
+      addToast(`Could not compact context: ${error.message}`, 'error', 5000)
+    } finally {
+      setIsCompacting(false)
+    }
   }
 
   const artifacts = useMemo(
@@ -1189,8 +1203,18 @@ export default function Chat() {
             <div className="chat-settings-danger-zone">
               <button
                 type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={handleCompactContext}
+                disabled={isStreaming || isCompacting || activeChat.history.length <= 8}
+                title="Replace older turns with a compact working-memory summary"
+              >
+                <i className="fas fa-compress-alt" /> {isCompacting ? 'Compacting…' : 'Compact context'}
+              </button>
+              <button
+                type="button"
                 className="chat-settings-danger-btn"
                 onClick={() => clearHistory(activeChat.id)}
+                disabled={isStreaming || isCompacting}
                 title={t('settings.clearHistory')}
               >
                 <i className="fas fa-eraser" /> {t('settings.clearHistory')}
@@ -1201,6 +1225,14 @@ export default function Chat() {
 
         {/* Messages */}
         <div className="chat-messages" ref={messagesRef}>
+          {syncError && <p className="text-note tone-warning" role="status">{syncError}</p>}
+          {activeChat.generationStatus === 'running' && (
+            <p className="text-note" role="status">Generating on LocalAI. You can change pages or refresh; the response will keep saving.</p>
+          )}
+          {activeChat.generationNotice && <p className="text-note tone-warning" role="status">{activeChat.generationNotice}</p>}
+          {isStreaming && !activeChat.generationId && activeChat.clientMCPServers?.length > 0 && (
+            <p className="text-note tone-warning" role="status">Browser-connected tools need this page open until their calls finish.</p>
+          )}
           {activeChat.history.length === 0 && !isStreaming && (
             <div className="chat-empty-state">
               <h2 className="chat-empty-title">{activeChat.localaiAssistant ? t('empty.manageTitle') : t('empty.startTitle')}</h2>
@@ -1268,6 +1300,7 @@ export default function Chat() {
               }
             }
             activeChat.history.forEach((msg, i) => {
+              if (msg.inProgress && isStreaming) return
               const isActivity = msg.role === 'thinking' || msg.role === 'reasoning' ||
                 msg.role === 'tool_call' || msg.role === 'tool_result'
               if (isActivity) {
@@ -1399,7 +1432,7 @@ export default function Chat() {
               </div>
             </div>
           )}
-          {isStreaming && !streamingContent && !streamingReasoning && streamingToolCalls.length === 0 && (
+          {isStreaming && activeChat.generationStatus !== 'running' && !streamingContent && !streamingReasoning && streamingToolCalls.length === 0 && (
             <div className="chat-message chat-message-assistant">
               <div className="chat-message-avatar">
                 <i className="fas fa-robot" />
@@ -1496,6 +1529,7 @@ export default function Chat() {
                 onChange={(model) => updateChatSettings(activeChat.id, { model })}
                 capability={CAP_CHAT}
                 className="chat-model-selector"
+                menuPlacement="top"
               />
               <button
                 type="button"

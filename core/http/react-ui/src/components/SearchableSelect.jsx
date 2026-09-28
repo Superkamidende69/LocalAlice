@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 export default function SearchableSelect({
   value, onChange, options, placeholder = 'Select...',
   allOption, searchPlaceholder = 'Search...',
-  disabled = false, style, className = '',
+  disabled = false, style, className = '', menuPlacement = 'bottom',
 }) {
   const { t } = useTranslation('common')
   const [open, setOpen] = useState(false)
@@ -133,7 +133,14 @@ export default function SearchableSelect({
       </button>
       {open && (
         <div style={{
-          position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100, marginTop: 4,
+          position: 'absolute',
+          // Chat's model picker sits in the bottom composer. Let it opt into
+          // an upward menu so the search results remain above the input instead
+          // of extending below the viewport.
+          ...(menuPlacement === 'top'
+            ? { bottom: '100%', marginBottom: 4 }
+            : { top: '100%', marginTop: 4 }),
+          left: 0, right: 0, zIndex: 100,
           minWidth: 200, maxHeight: 'min(260px, 60vh)', background: 'var(--color-bg-secondary)',
           border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)',
           boxShadow: 'var(--shadow-md)', display: 'flex', flexDirection: 'column',
