@@ -113,7 +113,7 @@ function loadChats() {
   return null
 }
 
-function saveChats(chats, activeChatId) {
+function saveChats(chats, activeChatId, deletedChatIds = []) {
   try {
     const data = {
       chats: chats.map(chat => ({
@@ -135,6 +135,7 @@ function saveChats(chats, activeChatId) {
         updatedAt: chat.updatedAt,
       })),
       activeChatId,
+      deletedChatIds,
       lastSaved: Date.now(),
     }
     localStorage.setItem(CHATS_STORAGE_KEY, JSON.stringify(data))
@@ -174,6 +175,7 @@ export function useChat(initialModel = '') {
   // durable before React's debounced persistence runs, otherwise a refresh
   // loses every token that arrived since the last completed message.
   const [initialStored] = useState(loadChats)
+  const pendingDeletesRef = useRef(new Set(initialStored?.deletedChatIds || []))
   const initialStoredRef = useRef(initialStored)
   const [chats, setChatsState] = useState(() => {
     const stored = initialStoredRef.current
@@ -209,7 +211,7 @@ export function useChat(initialModel = '') {
     const next = typeof updater === 'function' ? updater(chatsRef.current) : updater
     chatsRef.current = next
     dirtyRef.current = true
-    saveChats(next, activeChatIdRef.current)
+    saveChats(next, activeChatIdRef.current, [...pendingDeletesRef.current])
     setChatsState(next)
   }, [])
   const activeChatIdRef = useRef(activeChatId)
@@ -252,25 +254,30 @@ export function useChat(initialModel = '') {
       if (syncBusyRef.current || submittingRef.current) return
       syncBusyRef.current = true
       try {
-        if (dirtyRef.current && sharedChatsReadyRef.current) {
+        if ((dirtyRef.current || pendingDeletesRef.current.size > 0) && sharedChatsReadyRef.current) {
           const snapshot = chatsRef.current
+          const deletedChatIds = [...pendingDeletesRef.current]
           const saved = await fetch(apiUrl(API_CONFIG.endpoints.sharedChats), {
             method: 'PUT', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ chats: snapshot, activeChatId: activeChatIdRef.current, lastSaved: Date.now() }),
+            body: JSON.stringify({ chats: snapshot, deletedChatIds, activeChatId: activeChatIdRef.current, lastSaved: Date.now() }),
           })
           if (!saved.ok) throw new Error('Chat save failed; retrying.')
+          for (const id of deletedChatIds) pendingDeletesRef.current.delete(id)
+          saveChats(chatsRef.current, activeChatIdRef.current, [...pendingDeletesRef.current])
           if (chatsRef.current === snapshot) dirtyRef.current = false
         }
         const response = await fetch(apiUrl(API_CONFIG.endpoints.sharedChats))
         if (!response.ok) throw new Error('shared chats unavailable')
         const remote = await response.json()
         if (cancelled) return
-        if (!dirtyRef.current && !submittingRef.current && !legacyStreamingRef.current && Array.isArray(remote.chats) && remote.chats.length > 0) {
-          chatsRef.current = remote.chats
-          setChatsState(remote.chats)
+        if (!dirtyRef.current && pendingDeletesRef.current.size === 0 && !submittingRef.current && !legacyStreamingRef.current && Array.isArray(remote.chats) && (remote.chats.length > 0 || sharedChatsReadyRef.current)) {
+          const emptyChat = chatsRef.current.find(chat => chat.history.length === 0 && !remote.deletedChatIds?.includes(chat.id))
+          const next = remote.chats.length > 0 ? remote.chats : [emptyChat || createNewChat()]
+          chatsRef.current = next
+          setChatsState(next)
           // Active chat is a device preference; another device must not move it.
-          if (!remote.chats.some(c => c.id === activeChatIdRef.current)) setActiveChatId(remote.chats[0].id)
-          saveChats(remote.chats, activeChatIdRef.current)
+          if (!next.some(c => c.id === activeChatIdRef.current)) setActiveChatId(next[0].id)
+          saveChats(next, activeChatIdRef.current, [...pendingDeletesRef.current])
         } else if (Array.isArray(remote.chats) && remote.chats.length === 0 && !sharedChatsReadyRef.current) {
           dirtyRef.current = true
         }
@@ -288,7 +295,7 @@ export function useChat(initialModel = '') {
   }, [])
 
   useDebouncedEffect(() => {
-    saveChats(chats, activeChatId)
+    saveChats(chats, activeChatId, [...pendingDeletesRef.current])
   }, [chats, activeChatId])
 
   const addChat = useCallback((model = '', systemPrompt = '', mcpMode = false) => {
@@ -331,6 +338,7 @@ export function useChat(initialModel = '') {
   const deleteChat = useCallback((chatId) => {
     setChats(prev => {
       if (prev.length <= 1) return prev
+      pendingDeletesRef.current.add(chatId)
       const filtered = prev.filter(c => c.id !== chatId)
       if (chatId === activeChatId && filtered.length > 0) {
         setActiveChatId(filtered[0].id)
@@ -340,6 +348,7 @@ export function useChat(initialModel = '') {
   }, [activeChatId])
 
   const deleteAllChats = useCallback(() => {
+    for (const chat of chatsRef.current) pendingDeletesRef.current.add(chat.id)
     const chat = createNewChat(activeChat?.model || '')
     setChats([chat])
     setActiveChatId(chat.id)

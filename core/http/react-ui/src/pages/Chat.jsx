@@ -189,7 +189,6 @@ function ActivityGroup({ items, updateChatSettings, activeChat, getClientForTool
 function StreamingActivity({ reasoning, toolCalls, hasResponse }) {
   const { t } = useTranslation('chat')
   const hasContent = reasoning || (toolCalls && toolCalls.length > 0)
-  if (!hasContent) return null
 
   const contentRef = useRef(null)
   const [manualCollapse, setManualCollapse] = useState(null)
@@ -209,6 +208,8 @@ function StreamingActivity({ reasoning, toolCalls, hasResponse }) {
   useEffect(() => {
     setManualCollapse(null)
   }, [hasResponse])
+
+  if (!hasContent) return null
 
   const lastTool = toolCalls && toolCalls.length > 0 ? toolCalls[toolCalls.length - 1] : null
   const label = reasoning

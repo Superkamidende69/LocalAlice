@@ -10,7 +10,7 @@ on:
       - '.github/workflows/ci-tools-tests.yaml'
   push:
     branches:
-      - master
+      - main
     paths:
       - '.github/ci/**'
 jobs:

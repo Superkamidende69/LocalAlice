@@ -108,7 +108,8 @@ func registerSharedChatRoutes(app *echo.Echo, appConfig *config.ApplicationConfi
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid shared chat data"})
 		}
 		var shape struct {
-			Chats json.RawMessage `json:"chats"`
+			Chats          json.RawMessage `json:"chats"`
+			DeletedChatIDs []string        `json:"deletedChatIds"`
 		}
 		if json.Unmarshal(payload, &shape) != nil || !json.Valid(shape.Chats) {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": "shared chat data must include chats"})
@@ -126,10 +127,57 @@ func registerSharedChatRoutes(app *echo.Echo, appConfig *config.ApplicationConfi
 		if !ok {
 			return echo.NewHTTPError(400, "chats must be an array")
 		}
+		seen := make(map[string]bool)
+		for _, item := range newChats {
+			chat, ok := item.(map[string]any)
+			if !ok {
+				return echo.NewHTTPError(400, "each chat must be an object")
+			}
+			id, ok := chat["id"].(string)
+			if !ok || id == "" || seen[id] {
+				return echo.NewHTTPError(400, "chat IDs must be unique nonempty strings")
+			}
+			seen[id] = true
+		}
+		// Absence from a device's snapshot is not a deletion: it may not have
+		// seen chats created elsewhere. Persist explicit deletions so a delayed
+		// save cannot resurrect them, even after a controller restart.
+		deleted := make(map[string]bool)
+		if ids, ok := current["deletedChatIds"].([]any); ok {
+			for _, value := range ids {
+				if id, ok := value.(string); ok {
+					deleted[id] = true
+				}
+			}
+		}
+		for _, id := range shape.DeletedChatIDs {
+			if id == "" {
+				return echo.NewHTTPError(400, "deleted chat IDs must be nonempty strings")
+			}
+			deleted[id] = true
+		}
+		for _, item := range oldChats {
+			if chat, ok := item.(map[string]any); ok && chat["generationStatus"] == "running" {
+				if id, ok := chat["id"].(string); ok {
+					delete(deleted, id)
+				}
+			}
+		}
+		filtered := make([]any, 0, len(newChats))
+		for _, item := range newChats {
+			if !deleted[item.(map[string]any)["id"].(string)] {
+				filtered = append(filtered, item)
+			}
+		}
+		newChats = filtered
 		// A delayed browser save must not replace a running job's history.
 		for _, item := range oldChats {
 			old, ok := item.(map[string]any)
 			if !ok {
+				continue
+			}
+			id, ok := old["id"].(string)
+			if !ok || deleted[id] {
 				continue
 			}
 			found := false
@@ -154,10 +202,15 @@ func registerSharedChatRoutes(app *echo.Echo, appConfig *config.ApplicationConfi
 				}
 				break
 			}
-			if !found && old["generationStatus"] == "running" {
+			if !found {
 				newChats = append(newChats, old)
 			}
 		}
+		deletedIDs := make([]string, 0, len(deleted))
+		for id := range deleted {
+			deletedIDs = append(deletedIDs, id)
+		}
+		incoming["deletedChatIds"] = deletedIDs
 		incoming["chats"], incoming["lastSaved"] = newChats, time.Now().UnixMilli()
 		if err := write(incoming); err != nil {
 			return echo.NewHTTPError(500, "Unable to save chats")
@@ -197,6 +250,17 @@ func startSavedChat(jobs *uichat.Store, read func() (map[string]any, error), wri
 		data, err := read()
 		if err != nil {
 			return echo.NewHTTPError(500, "Unable to read chats")
+		}
+		chatID, ok := input.Chat["id"].(string)
+		if !ok || chatID == "" {
+			return echo.NewHTTPError(400, "chat ID must be a nonempty string")
+		}
+		if ids, ok := data["deletedChatIds"].([]any); ok {
+			for _, id := range ids {
+				if id == chatID {
+					return echo.NewHTTPError(409, "Chat was deleted; create a new conversation")
+				}
+			}
 		}
 		input.Chat["generationId"] = input.ID
 		input.Chat["generationStatus"] = "running"

@@ -9,7 +9,7 @@ on:
       - 'tests/e2e/mock-backend/**'
   push:
     branches:
-      - master
+      - main
 
 concurrency:
   group: ci-tests-ui-e2e-${{ github.event.pull_request.number || github.sha }}-${{ github.repository }}

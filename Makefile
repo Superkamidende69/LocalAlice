@@ -138,16 +138,19 @@ install-go-tools:
 	go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.34.2
 
 ## React UI:
-react-ui:
-ifneq ($(wildcard core/http/react-ui/dist),)
-	@echo "react-ui dist already exists, skipping build"
-else
-	cd core/http/react-ui && npm install && npm run build
-endif
+REACT_UI_INPUTS := $(shell find core/http/react-ui/src core/http/react-ui/public -type f -o -type d) \
+	core/http/react-ui/index.html core/http/react-ui/vite.config.js \
+	core/http/react-ui/package.json core/http/react-ui/package-lock.json
+
+.PHONY: react-ui
+react-ui: core/http/react-ui/dist/index.html
+
+core/http/react-ui/dist/index.html: $(REACT_UI_INPUTS)
+	cd core/http/react-ui && npm ci && npm run build
 
 react-ui-docker:
 	docker run --entrypoint /bin/bash -v $(CURDIR):/app:z oven/bun:1 \
-	  -c "cd /app/core/http/react-ui && bun install && bun run build"
+	  -c "cd /app/core/http/react-ui && bun install --frozen-lockfile && bun run build"
 
 core/http/react-ui/dist: react-ui
 
@@ -292,8 +295,8 @@ test-coverage-check: test-coverage
 LINT_EXCLUDE_DIRS_RE=/(backend/go/(piper|silero-vad|llm)|cmd/launcher)(/|$$)
 
 ## Set LINT_NEW_FROM to a git ref to override .golangci.yml's
-## new-from-merge-base (origin/master). Useful from a fork clone where
-## origin/master is stale relative to the canonical repo.
+## new-from-merge-base (origin/main). Useful from a fork clone where
+## origin/main is stale relative to the canonical repo.
 LINT_NEW_FROM?=
 lint:
 	@command -v golangci-lint >/dev/null 2>&1 || { \
@@ -1555,14 +1558,14 @@ PLAYWRIGHT_WORKERS_FLAG = $(if $(UI_TEST_WORKERS),--workers=$(UI_TEST_WORKERS),)
 ## when PLAYWRIGHT_CHROMIUM_PATH is set (flake dev shell), else falls back to
 ## downloading it as `test-ui-e2e` does.
 test-ui: build-mock-backend protogen-go
-	cd core/http/react-ui && bun install && bun run build
+	cd core/http/react-ui && bun install --frozen-lockfile && bun run build
 	$(GOCMD) build -o tests/e2e-ui/ui-test-server ./tests/e2e-ui
 	cd core/http/react-ui && sh $(CURDIR)/scripts/ensure-playwright-browser.sh && bunx playwright test $(PLAYWRIGHT_WORKERS_FLAG)
 
 ## The stale-chunk specs need the production code-split bundle. The V8 coverage
 ## bundle below inlines dynamic imports to keep every page in its denominator.
 test-ui-stale-chunk: build-mock-backend protogen-go
-	cd core/http/react-ui && bun install && bun run build
+	cd core/http/react-ui && bun install --frozen-lockfile && bun run build
 	$(GOCMD) build -o tests/e2e-ui/ui-test-server ./tests/e2e-ui
 	cd core/http/react-ui && sh $(CURDIR)/scripts/ensure-playwright-browser.sh && bunx playwright test --grep @production-chunks --workers=1
 
@@ -1577,7 +1580,7 @@ test-ui-stale-chunk: build-mock-backend protogen-go
 ## still exists: `bun run build:coverage` + unset PW_V8_COVERAGE.)
 test-ui-coverage: build-mock-backend protogen-go
 	trap 'rm -rf "$(CURDIR)/core/http/react-ui/dist"' EXIT; \
-	( cd core/http/react-ui && bun install && bun run build:coverage-v8 ) && \
+	( cd core/http/react-ui && bun install --frozen-lockfile && bun run build:coverage-v8 ) && \
 	$(GOCMD) build -o tests/e2e-ui/ui-test-server ./tests/e2e-ui && \
 	( cd core/http/react-ui && rm -rf .nyc_output coverage && \
 	    sh $(CURDIR)/scripts/ensure-playwright-browser.sh && \

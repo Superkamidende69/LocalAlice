@@ -21,6 +21,14 @@ Jobs use the same authenticated inference handler and model permissions as direc
 chat requests. Cancellation is restricted to the submitting account. Conversation
 storage remains shared across accounts on this instance, as before.
 
+Chat saves merge conversations across devices. Omitting a conversation from a
+`PUT /api/chats` snapshot no longer deletes it: clients must send its ID in
+`deletedChatIds`. The server remembers deleted IDs so delayed saves cannot
+restore them, including after a restart. A deleted conversation cannot start a
+new generation; create a new conversation instead. Running generations remain
+protected from deletion until stopped or completed. Reload older browser tabs
+after upgrading to use the new deletion protocol.
+
 Output is capped at 4096 tokens. GPT-OSS requests default to low reasoning effort.
 A repeated thinking passage or 24,000 characters of thinking stops the job with
 a visible explanation; this is a guard, not a guarantee that every model loop is

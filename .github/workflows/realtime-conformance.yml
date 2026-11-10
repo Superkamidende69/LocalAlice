@@ -24,7 +24,7 @@ on:
       - '.github/workflows/realtime-conformance.yml'
   push:
     branches:
-      - master
+      - main
     paths:
       - 'core/http/endpoints/openai/coordinator/**'
       - 'core/http/endpoints/openai/respcoord/**'

@@ -17,6 +17,64 @@ import (
 )
 
 var _ = Describe("saved chat HTTP routes", func() {
+	It("merges stale device snapshots and remembers explicit deletions after restart", func() {
+		dir, err := os.MkdirTemp("", "shared-chat-merge-")
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(os.RemoveAll, dir)
+		cfg := &config.ApplicationConfig{DataPath: dir}
+		app := echo.New()
+		registerSharedChatRoutes(app, cfg)
+		request := func(method, path string, body any) *httptest.ResponseRecorder {
+			data, err := json.Marshal(body)
+			Expect(err).NotTo(HaveOccurred())
+			rec := httptest.NewRecorder()
+			app.ServeHTTP(rec, httptest.NewRequest(method, path, bytes.NewReader(data)))
+			return rec
+		}
+		put := func(chats []any, deleted ...string) map[string]any {
+			response := request("PUT", "/api/chats", map[string]any{"chats": chats, "deletedChatIds": deleted})
+			Expect(response.Code).To(Equal(200), response.Body.String())
+			var result map[string]any
+			Expect(json.Unmarshal(response.Body.Bytes(), &result)).To(Succeed())
+			return result
+		}
+		first := map[string]any{"id": "first", "name": "First", "history": []any{}, "updatedAt": 1}
+		second := map[string]any{"id": "second", "name": "Other device", "history": []any{}, "updatedAt": 2}
+		put([]any{first})
+		put([]any{first, second})
+		first["name"], first["updatedAt"] = "Renamed", 3
+		merged := put([]any{first})
+		Expect(merged["chats"]).To(HaveLen(2))
+		Expect(merged["chats"].([]any)[0].(map[string]any)["name"]).To(Equal("Renamed"))
+		Expect(put([]any{first}, "second")["chats"]).To(HaveLen(1))
+
+		app = echo.New()
+		registerSharedChatRoutes(app, cfg)
+		stale := put([]any{first, second})
+		Expect(stale["chats"]).To(HaveLen(1))
+		Expect(stale["deletedChatIds"]).To(ContainElement("second"))
+		Expect(request("POST", "/api/chats/generate", map[string]any{"id": "late-job", "chat": second}).Code).To(Equal(409))
+		Expect(put([]any{}, "first")["chats"]).To(BeEmpty())
+		Expect(put([]any{first, second})["chats"]).To(BeEmpty())
+	})
+
+	It("rejects malformed chat identities without changing saved conversations", func() {
+		dir, err := os.MkdirTemp("", "shared-chat-validation-")
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(os.RemoveAll, dir)
+		app := echo.New()
+		registerSharedChatRoutes(app, &config.ApplicationConfig{DataPath: dir})
+		for _, payload := range []string{
+			`{"chats":[{"id":{}}]}`, `{"chats":[null]}`,
+			`{"chats":[{"id":"same"},{"id":"same"}]}`,
+			`{"chats":[],"deletedChatIds":[{}]}`,
+		} {
+			rec := httptest.NewRecorder()
+			app.ServeHTTP(rec, httptest.NewRequest("PUT", "/api/chats", bytes.NewBufferString(payload)))
+			Expect(rec.Code).To(Equal(400), payload)
+		}
+	})
+
 	It("requires auth and preserves generation after disconnect and a stale chat save", func() {
 		dir, err := os.MkdirTemp("", "saved-chat-routes-")
 		Expect(err).NotTo(HaveOccurred())
@@ -69,6 +127,8 @@ var _ = Describe("saved chat HTTP routes", func() {
 		}
 		Eventually(func() int { return len(getChat()["history"].([]any)) }, 3*time.Second).Should(Equal(2))
 		Expect(request("PUT", "/api/chats", map[string]any{"chats": []any{chat}}, "test-secret").Code).To(Equal(200))
+		Expect(getChat()["generationStatus"]).To(Equal("running"))
+		Expect(request("PUT", "/api/chats", map[string]any{"chats": []any{}, "deletedChatIds": []string{"test-chat"}}, "test-secret").Code).To(Equal(200))
 		Expect(getChat()["generationStatus"]).To(Equal("running"))
 		close(release)
 		Eventually(func() any { return getChat()["generationStatus"] }, 3*time.Second).Should(Equal("completed"))
